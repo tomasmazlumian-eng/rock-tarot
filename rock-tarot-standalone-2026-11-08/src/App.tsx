@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { TarotCard, UserRegistration, Submission } from "./types";
-import { TAROT_DECK, FUTURE_DECKS } from "./cardsData";
+import { TAROT_DECK } from "./cardsData";
 import { CardArtwork, CardBack } from "./cardArt";
 import {
   toggleAmbientSound,
@@ -10,34 +10,24 @@ import {
 } from "./audioEffects";
 import {
   getSubmissions,
-  saveSubmission,
   processSubmissionEmails,
   fetchCloudSubmissions,
   exportSubmissionsToCSV,
-  OWNER_EMAIL,
-  getGoogleSheetWebhook,
-  setGoogleSheetWebhook
+  OWNER_EMAIL
 } from "./emailService";
 import {
   Sparkles,
   Volume2,
   VolumeX,
-  Dices,
   Share2,
-  Instagram,
   RefreshCw,
   Download,
   Lock,
-  CheckCircle,
   Search,
-  Layers,
   ChevronLeft,
   ChevronRight,
-  Shield,
   ArrowLeft,
-  Flame,
   Award,
-  Music2,
   ExternalLink,
   Copy
 } from "lucide-react";
@@ -52,11 +42,10 @@ export default function App() {
 
   // Selected card & reveal state
   const [selectedCard, setSelectedCard] = useState<TarotCard | null>(null);
-  const [isRevealed, setIsRevealed] = useState(false);
   const [cardFlipped, setCardFlipped] = useState(false);
 
   // Shuffle animation sequence state
-  const [shuffleStep, setShuffleStep] = useState<1 | 2 | 3 | 4 | 5>(1);
+  const [shuffleStep, setShuffleStep] = useState<number>(1);
 
   // Feedback & share
   const [shareFeedback, setShareFeedback] = useState<string | null>(null);
@@ -65,7 +54,25 @@ export default function App() {
   // Daily limit countdown state
   const [timeUntilReset, setTimeUntilReset] = useState<string>("");
 
-   const goToNextTodayCard = () => {
+  // Submissions state
+  const [submissionsList, setSubmissionsList] = useState<Submission[]>(() => getSubmissions());
+  const [adminSearch, setAdminSearch] = useState("");
+
+  // Creator Console State
+  const [adminUnlocked, setAdminUnlocked] = useState(false);
+  const [showAdminLockModal, setShowAdminLockModal] = useState(false);
+  const [adminPasscodeInput, setAdminPasscodeInput] = useState("");
+  const [adminPasscodeError, setAdminPasscodeError] = useState<string | null>(null);
+
+  const DAILY_CARD_LIMIT = 3;
+  const lessonsUrl = "https://www.lessonface.com/TomyMaz";
+  const creatorCode = "2020";
+
+  // Touch swipe handling to slide between daily cards
+  const touchStartXRef = useRef<number | null>(null);
+  const touchStartYRef = useRef<number | null>(null);
+
+  const goToNextTodayCard = () => {
     if (!user || !selectedCard) return;
     const status = checkDailyDrawStatus(user.email);
     if (status.cardIds.length <= 1) return;
@@ -86,10 +93,6 @@ export default function App() {
     if (prevIdx < 0) prevIdx = status.cardIds.length - 1;
     const found = TAROT_DECK.find((c) => c.id === status.cardIds[prevIdx]);
     if (found) {
-      setSelectedCard(found);
-      if (soundEnabled) playCardFlipSound();
-    }
-  }
       setSelectedCard(found);
       if (soundEnabled) playCardFlipSound();
     }
@@ -126,34 +129,6 @@ export default function App() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [currentView, user, selectedCard]);
 
-  // Submissions state
-  const [submissionsList, setSubmissionsList] = useState<Submission[]>(() => getSubmissions());
-  const [isSyncingCloud, setIsSyncingCloud] = useState(false);
-
-  const refreshAllSubmissions = async () => {
-    setIsSyncingCloud(true);
-    const local = getSubmissions();
-    const cloud = await fetchCloudSubmissions();
-    if (cloud.length > 0) {
-      const combined = [...local];
-      cloud.forEach((c) => {
-        if (!combined.some((item) => item.email.toLowerCase() === c.email.toLowerCase() && item.archetype === c.archetype)) {
-          combined.unshift(c);
-        }
-      });
-      setSubmissionsList(combined);
-    } else {
-      setSubmissionsList(local);
-    }
-    setIsSyncingCloud(false);
-  };
-
-  useEffect(() => {
-    if (currentView === "admin") {
-      refreshAllSubmissions();
-    }
-  }, [currentView]);
-
   useEffect(() => {
     const updateCountdown = () => {
       const now = new Date();
@@ -170,9 +145,6 @@ export default function App() {
     const interval = setInterval(updateCountdown, 1000);
     return () => clearInterval(interval);
   }, []);
-
-  // Daily limit helpers (3 cards per day per email)
-  const DAILY_CARD_LIMIT = 3;
 
   const getDailyDrawForEmail = (email: string) => {
     try {
@@ -193,22 +165,20 @@ export default function App() {
     }
   };
 
-  const recordDailyDrawForEmail = (cardId: string) => {ot_daily_${email.toLowerCase().trim()}`;
+  const recordDailyDrawForEmail = (email: string, cardId: string) => {
+    try {
+      const key = `rock_tarot_daily_${email.toLowerCase().trim()}`;
       const today = new Date().toISOString().split("T")[0];
       const existing = getDailyDrawForEmail(email);
       const updatedCardIds = existing ? [...existing.cardIds, cardId] : [cardId];
       localStorage.setItem(
         key,
-        JSON.stringify({ cardIds: updatedCardIds, date: today, timestamp: Date.now() })
-      );
-    } catch {
+        JSON.stringify({ carddate: today, timestamp: Date.now() }) {
       // ignore
     }
   };
 
-  const checkDailyDrawStatus = (
-    email: string
-  ): { canDraw: boolean; count: number; remaining: number; cardIds: string[] } => {
+  const checkDailyDrawStatus = (email: string) => {
     const record = getDailyDrawForEmail(email);
     if (!record) {
       return { canDraw: true, count: 0, remaining: DAILY_CARD_LIMIT, cardIds: [] };
@@ -221,38 +191,6 @@ export default function App() {
       cardIds: record.cardIds
     };
   };
-
-  const DEFAULT_LESSONS_URL = "https://www.lessonface.com/TomyMaz";
-  const [lessonsUrl, setLessonsUrl] = useState(() => {
-    try {
-      return localStorage.getItem("rock_tarot_lessons_url") || DEFAULT_LESSONS_URL;
-    } catch {
-      return DEFAULT_LESSONS_URL;
-    }
-  });
-
-  // Admin Dashboard settings state
-  const [adminUnlocked, setAdminUnlocked] = useState(false);
-  const [showAdminLockModal, setShowAdminLockModal] = useState(false);
-  const [adminPasscodeInput, setAdminPasscodeInput] = useState("");
-  const [adminPasscodeError, setAdminPasscodeError] = useState<string | null>(null);
-
-  const [creatorCode, setCreatorCode] = useState(() => {
-    try {
-      return localStorage.getItem("rock_tarot_creator_code") || "2020";
-    } catch {
-      return "2020";
-    }
-  });
-  const [newCodeInput, setNewCodeInput] = useState("");
-  const [codeChangeSuccess, setCodeChangeSuccess] = useState(false);
-
-  const [sheetWebhookInput, setSheetWebhookInput] = useState(() => getGoogleSheetWebhook());
-  const [sheetSavedNote, setSheetSavedNote] = useState(false);
-  const [showSheetGuide, setShowSheetGuide] = useState(false);
-  const [adminFilterType, setAdminFilterType] = useState<"all" | "random" | "chosen">("all");
-  const [adminSearch, setAdminSearch] = useState("");
-  const [showPrivacyModal, setShowPrivacyModal] = useState(false);
 
   useEffect(() => {
     try {
@@ -283,24 +221,19 @@ export default function App() {
     }
     setUser(null);
     setSelectedCard(null);
-    setIsRevealed(false);
     setCardFlipped(false);
     setCurrentView("landing");
   };
 
-  const syncDailyDrawsFromCloud = async (
-    email: string
-  ): Promise<{ count: number; cancardIds: string[] }> => {
+  const syncDailyDrawsFromCloud = async (email: string) => {
+    const normalizedEmail = email.toLowerCase().trim();
     if (!normalizedEmail) return { count: 0, canDraw: true, cardIds: [] };
 
     try {
       const cloud = await fetchCloudSubmissions();
       if (!cloud || cloud.length === 0) {
         const local = checkDailyDrawStatus(normalizedEmail);
-        return { count: local.count, canDraw: local.canDraw, cardIds: local.cardIds };
-      }
-
-      const now = new Date();
+        return { count: local.count, cancardIds: local.cardIds }; Date();
       const currentYear = now.getFullYear();
       const currentMonth = now.getMonth();
       const currentDate = now.getDate();
@@ -333,10 +266,8 @@ export default function App() {
               (c) =>
                 c.archetype.toLowerCase() === target ||
                 `${c.romanNumber} - ${c.archetype}`.toLowerCase() === target ||
-                target.includes(c.archetype.toLowerCase()) ||
-                (entry.artist && c.artist.toLowerCase() === entry.artist.toLowerCase())
+                target.includes(c.archetype.toLowerCase())
             );
-
             const cardIdToAdd = match ? match.id : (TAROT_DECK[idx % TAROT_DECK.length]?.id || `claimed-${idx}`);
             if (!cloudCardIds.includes(cardIdToAdd)) {
               cloudCardIds.push(cardIdToAdd);
@@ -353,14 +284,8 @@ export default function App() {
         const key = `rock_tarot_daily_${normalizedEmail}`;
         localStorage.setItem(
           key,
-          JSON.stringify({ cardIds: mergedIds, date: todayStr, timestamp: Date.now() })
-        );
-
-        const count = mergedIds.length;
-        return { count, canDraw: count < DAILY_CARD_LIMIT, cardIds: mergedIds };
-      }
-    } catch (err) {
-      console.warn("Could not sync cloud daily draws", err);
+          JSON.stringify({ carddate: todayStr, timestamp: Date.now() }) = mergedIds.length;
+        return { count, canDraw: count < DAILY_CARD_LIMIT, card}; error", err);
     }
 
     const localStatus = checkDailyDrawStatus(normalizedEmail);
@@ -378,7 +303,6 @@ export default function App() {
         const existing = TAROT_DECK.find((c) => c.id === lastCardId);
         if (existing) {
           setSelectedCard(existing);
-          setIsRevealed(true);
           setCardFlipped(true);
           setCurrentView("reveal");
           return;
@@ -399,7 +323,6 @@ export default function App() {
       const existing = TAROT_DECK.find((c) => c.id === lastCardId);
       if (existing) {
         setSelectedCard(existing);
-        setIsRevealed(true);
         setCardFlipped(true);
         setCurrentView("reveal");
         return;
@@ -423,7 +346,6 @@ export default function App() {
         const existing = TAROT_DECK.find((c) => c.id === lastCardId);
         if (existing) {
           setSelectedCard(existing);
-          setIsRevealed(true);
           setCardFlipped(true);
           setCurrentView("reveal");
         }
@@ -436,8 +358,7 @@ export default function App() {
     setShuffleStep(1);
 
     const availableCards = TAROT_DECK.filter((c) => !status.cardIds.includes(c.id));
-    const pool = availableCards.length > 0 ? availableCards : TAROT_DECK;
-    const randomIndex = Math.floor(Math.random() * pool.length);
+    const pool = availableCards.length > 0 ?const randomIndex = Math.floor(Math.random() * pool.length);
     const chosen = pool[randomIndex];
     setSelectedCard(chosen);
 
@@ -470,7 +391,6 @@ export default function App() {
     activeUser: UserRegistration
   ) => {
     setSelectedCard(card);
-    setIsRevealed(true);
     setCardFlipped(true);
     setCurrentView("reveal");
 
@@ -484,15 +404,13 @@ export default function App() {
     const submission: Submission = {
       id: "sub-" + Date.now(),
       name: activeUser.name,
-      email: activeUser.email,
       experienceType: "random",
       cardNumber: card.number,
-      romanNumber: card.romanNumber,
-      archetype: card.archetype,
+archetype: card.archetype,
       artist: card.artist,
+      band: card.band,
       submissionDate: new Date().toISOString(),
-      emailStatus: "pending",
-      emailSentToOwner: false,
+      emailemailSentToOwner: false,
       emailSentToUser: false
     };
 
@@ -500,11 +418,11 @@ export default function App() {
     setSubmissionsList(getSubmissions());
   };
 
-  const safeCopyToClipboard = async (text: string): Promise<boolean> => {
+  const safeCopyToClipboard = async (text: string) => {
     try {
       if (navigator.clipboard && window.isSecureContext) {
         await navigator.clipboard.writeText(text);
-        return true;
+        return;
       }
     } catch {
       // fallback
@@ -515,74 +433,47 @@ export default function App() {
       textArea.value = text;
       textArea.style.position = "fixed";
       textArea.style.left = "-999999px";
-      textArea.style.top = "-999999px";
       document.body.appendChild(textArea);
       textArea.focus();
       textArea.select();
-      const successful = document.execCommand("copy");
+      document.execCommand("copy");
       document.body.removeChild(textArea);
-      return successful;
     } catch {
-      return false;
+      // fallback
     }
   };
 
-  const handleShareCard = async (platform: "general" | "instagram" | "tiktok") => {
+  const handleShareCard = async () => {
     if (!selectedCard) return;
     const shareText = `✦ ROCK TAROT ✦\nI drew ${selectedCard.romanNumber} — ${selectedCard.archetype} (${selectedCard.artist})!\n"Which Rock Tarot card are you? Discover your rock soul."`;
-    
-    if (platform === "instagram") {
-      setShareFeedback("Instagram Story card ready! Image downloaded & caption copied.");
-      await safeCopyToClipboard(shareText);
-      generateAndDownloadCardImage(selectedCard);
-    } else if (platform === "tiktok") {
-      setShareFeedback("Caption copied! Tag #RockTarot #DiscoverYourRockSoul in your video.");
-      await safeCopyToClipboard(shareText);
-      generateAndDownloadCardImage(selectedCard);
-    } else {
-      if (navigator.share) {
-        try {
-          await navigator.share({
-            title: `Rock Tarot: ${selectedCard.archetype}`,
-            text: shareText,
-});
-        } catch {
-          await safeCopyToClipboard(shareText);
-          setShareFeedback("Card link & interpretation copied to clipboard!");
-        }
-      } else {
-        await safeCopyToClipboard(shareText);
-        setShareFeedback("Card link & interpretation copied to clipboard!");
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          Tarot: ${selectedCard.archetype}`, window.location.href
+        });
+        return;
+      } catch {
+        // user canceled
       }
     }
-
-    setTimeout(() => setShareFeedback(null), 5000);
+    await safeCopyToClipboard(shareText);
+    setShareFeedback("Copied to clipboard!");
+    setTimeout(() => setShareFeedback(null), 4000);
   };
 
   const generateAndDownloadCardImage = (card: TarotCard) => {
     if (card.imageUrl) {
-      const img = new Image();
-      img.crossOrigin = "anonymous";
-      img.onload = () => {
-        const canvas = document.createElement("canvas");
-        canvas.width = img.naturalWidth || 1200;
-        canvas.height = img.naturalHeight || 1800;
-        const ctx = canvas.getContext("2d");
-        if (ctx) {
-          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-          const link = document.createElement("a");
-          link.download = `RockTarot_${card.romanNumber}_${card.archetype.replace(/\s+/g, "_")}.png`;
-          link.href = canvas.toDataURL("image/png");
-          link.click();
-        }
-      };
-      img.src = card.imageUrl;
+      const link = document.createElement("a");
+      link.href = card.imageUrl;
+      link.download = `RockTarot_${card.romanNumber}_${card.archetype}.png`;
+      link.target = "_blank";
+      link.click();
     }
   };
 
   return (
     <div className="min-h-screen w-full bg-[#070609] text-stone-100 flex flex-col font-sans selection:bg-red-950 selection:text-amber-200 relative overflow-x-hidden">
-      {/* Background Occult Atmosphere */}
+      {/* Background Atmosphere */}
       <div className="fixed inset-0 pointer-events-none z-0">
         <div className="absolute -top-40 -left-40 w-96 h-96 bg-red-950/20 rounded-full blur-3xl" />
         <div className="absolute top-1/2 -right-40 w-96 h-96 bg-amber-950/20 rounded-full blur-3xl" />
@@ -608,15 +499,13 @@ export default function App() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2 sm:gap-4">
-          <button
+        <div className="flex items-center gap-2<button
             onClick={handleToggleSound}
             title={soundEnabled ? "Mute audio" : "Enable audio"}
             className={`p-2 rounded-lg text-xs border transition-all flex items-center gap-1 ${
               soundEnabled
                 ? "bg-red-950/40 text-amber-300 border-amber-500/50"
-                : "bg-black/30 text-stone-400 border-stone-800 hover:text-stone-200"
-            }`}
+                : "bg-black/30 text-stone-400 border-stone-800}`}
           >
             {soundEnabled ? (
               <Volume2 className="w-4 h-4 text-amber-400" />
@@ -702,7 +591,7 @@ export default function App() {
             <div className="flex flex-col items-center justify-center mt-12 w-full max-w-sm gap-3">
               <button
                 onClick={handleStartDiscovery}
-                className="w-full px-10 py-4 rounded-xl font-serif text-sm font-bold tracking-widest uppercase bg-gradient-to-r from-amber-500 via-amber-400 to-amber-600 text-stone-950active:scale-95 transition-all shadow-lg flex items-center justify-center gap-2.5 border border-amber-200"
+                className="w-full px-10 py-4 rounded-xl font-serif text-sm font-bold tracking-widest uppercase bg-gradient-to-r from-amber-500 via-amber-400 to-amber-600 text-stone-950 hover:brightness-110 active:scale-95 transition-all shadow-lg flex items-center justify-center gap-2.5 border border-amber-200"
               >
                 <span>DISCOVER MY CARD</span>
                 <ChevronRight className="w-4 h-4 text-stone-950 stroke-[3]" />
@@ -713,8 +602,7 @@ export default function App() {
                   onClick={handleSwitchSeeker}
                   className="text-xs font-serif text-stone-400 hover:text-amber-300 flex items-center gap-1.5 transition-colors pt-1"
                 >
-                  <span>Seeker: <strong className="text-amber-200">{user.name}</strong></span>
-                  <span>•</span>
+                  <span>SeekclassName="text-amber-200">{user.name}</strong></span></span>
                   <span className="underline text-amber-400/90 font-medium">Switch Seeker / Log Out</span>
                 </button>
               )}
@@ -838,7 +726,8 @@ export default function App() {
                 <span className="text-xs uppercase tracking-widest font-serif font-bold text-amber-400 block mb-1">
                   Your message:
                 </span>
-                <p className="font-serif text-basetext-white font-medium italic">}&rdquo;
+                <p className="font-serif text-base sm:text-lg text-white font-medium italic">
+                  &ldquo;{selectedCard.cardMessage}&rdquo;
                 </p>
               </div>
 
@@ -932,7 +821,7 @@ export default function App() {
             {/* Action Buttons */}
             <div className="flex flex-wrap items-center justify-center gap-3 max-w-xl w-full">
               <button
-                onClick={() => handleShareCard("general")}
+                onClick={handleShareCard}
                 className="px-5 py-3 rounded-xl bg-amber-500 text-stone-950 font-serif font-bold text-xs uppercase tracking-widest flex items-center gap-2"
               >
                 <Share2 className="w-4 h-4" />
@@ -947,6 +836,7 @@ export default function App() {
                 <span>DOWNLOAD ART (PNG)</span>
               </button>
             </div>
+            {shareFeedback && <p className="text-xs text-amber-300 mt-2">{shareFeedback}</p>}
           </div>
         )}
 
@@ -1043,7 +933,7 @@ export default function App() {
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                if (adminPasscodeInput.trim() === creatorCode.trim()) {
+                if (adminPasscodeInput.trim() === creatorCode) {
                   setAdminUnlocked(true);
                   setShowAdminLockModal(false);
                   setCurrentView("admin");
@@ -1081,7 +971,9 @@ export default function App() {
               if (adminUnlocked) setCurrentView("admin");
               else setShowAdminLockModal(true);
             }}
-            className="text-[11px] text-stone-500flex items-center gap-1" h-3" />
+            className="text-[11px] text-stone-500 hover:text-amber-300 flex items-center gap-1"
+          >
+            <Lock className="w-3 h-3" />
             <span>Music Freak</span>
           </button>
         </div>
@@ -1095,7 +987,9 @@ function RegistrationModalView({
   onSuccess,
   onSyncCheck
 }: {
-  => void;string) => Promise<{ count: number; canDraw: boolean; cardIds: string[] }>;
+  onClose: () => void;
+  onSuccess: (user: UserRegistration) => void;
+  onSyncCheck: (email: string) => Promise<{ count: number; canDraw: boolean; cardIds: string[] }>;
 }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
