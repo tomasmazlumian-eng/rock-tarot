@@ -167,17 +167,16 @@ export default function App() {
 
   const recordDailyDrawForEmail = (email: string, cardId: string) => {
     try {
-      const key = `rock_tarot_daily_${email.toLowerCase().trim()}`;
-      const today = new Date().toISOString().split("T")[0];
+       const recordDailyDrawForEmail = (email: string,=> {Key = "rock_tarot_daily_" + cleanEmail;
+      const todayStr = new Date().toISOString().split("T")[0];
       const existing = getDailyDrawForEmail(email);
-      const updatedCardIds = existing ? [...existing.cardIds, cardId] : [cardId];
-      localStorage.setItem(
-        key,
-        JSON.stringify({ carddate: today, timestamp: Date.now() }) {
+      const list = existing ? existing.cardIds : [];
+      list.push(cardId);
+      const payload = {date: todayStr };));
+    } catch (e) {
       // ignore
     }
   };
-
   const checkDailyDrawStatus = (email: string) => {
     const record = getDailyDrawForEmail(email);
     if (!record) {
