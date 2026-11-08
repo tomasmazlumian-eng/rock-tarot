@@ -65,17 +65,13 @@ export default function App() {
   // Daily limit countdown state
   const [timeUntilReset, setTimeUntilReset] = useState<string>("");
 
-  // Touch swipe handling to slide between daily cards
-  const touchStartXRef = useRef<number | null>(null);
-  const touchStartYRef = useRef<number | null>(null);
-
-  const goToNextTodayCard = () => {
+   const goToNextTodayCard = () => {
     if (!user || !selectedCard) return;
     const status = checkDailyDrawStatus(user.email);
     if (status.cardIds.length <= 1) return;
-    const currentIdx = status.cardIds.indexOf(selectedCard.id);
-    const nextIdx = currentIdx >= 0 ? (currentIdx + 1) % status.cardIds.const nextCardId = status.cardIds[nextIdx];
-    const found = TAROT_DECK.find((c) => c.id === nextCardId);
+    let nextIdx = status.cardIds.indexOf(selectedCard.id) + 1;
+    if (nextIdx >= status.cardIds.length) nextIdx = 0;
+    const found = TAROT_DECK.find((c) => c.id === status.cardIds[nextIdx]);
     if (found) {
       setSelectedCard(found);
       if (soundEnabled) playCardFlipSound();
@@ -86,14 +82,14 @@ export default function App() {
     if (!user || !selectedCard) return;
     const status = checkDailyDrawStatus(user.email);
     if (status.cardIds.length <= 1) return;
-    const currentIdx = status.cardIds.indexOf(selectedCard.id);
-    const prevIdx =
-      currentIdx >= 0
-        ? (currentIdx - 1 + status.cardIds.length) % status.cardIds.length
-        : status.cardIds.length - 1;
-    const prevCardId = status.cardIds[prevIdx];
-    const found = TAROT_DECK.find((c) => c.id === prevCardId);
+    let prevIdx = status.cardIds.indexOf(selectedCard.id) - 1;
+    if (prevIdx < 0) prevIdx = status.cardIds.length - 1;
+    const found = TAROT_DECK.find((c) => c.id === status.cardIds[prevIdx]);
     if (found) {
+      setSelectedCard(found);
+      if (soundEnabled) playCardFlipSound();
+    }
+  }
       setSelectedCard(found);
       if (soundEnabled) playCardFlipSound();
     }
